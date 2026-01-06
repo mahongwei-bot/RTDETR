@@ -432,17 +432,23 @@ class RTDETRDetectionModel(DetectionModel):
         predict: Performs a forward pass through the network and returns the output.
     """
 
-    def __init__(self, cfg='rtdetr-l.yaml', ch=3, nc=None, verbose=True):
-        """
-        Initialize the RTDETRDetectionModel.
-
-        Args:
-            cfg (str): Configuration file name or path.
-            ch (int): Number of input channels.
-            nc (int, optional): Number of classes. Defaults to None.
-            verbose (bool, optional): Print additional information during initialization. Defaults to True.
-        """
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+    # def __init__(self, cfg='rtdetr-l.yaml', ch=3, nc=None, verbose=True):
+    #     """
+    #     Initialize the RTDETRDetectionModel.
+    #
+    #     Args:
+    #         cfg (str): Configuration file name or path.
+    #         ch (int): Number of input channels.
+    #         nc (int, optional): Number of classes. Defaults to None.
+    #         verbose (bool, optional): Print additional information during initialization. Defaults to True.
+    #     """
+    #     super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+    def __init__(self, cfg='', ch=3, nc=None, verbose=True):
+        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)  # :contentReference[oaicite:17]{index=17}
+        head = self.model[-1]
+        so_cfg = self.yaml.get('so_guidance', None)
+        if isinstance(so_cfg, dict) and hasattr(head, 'enable_small_object_guidance'):
+            head.enable_small_object_guidance(**so_cfg)
 
     def init_criterion(self):
         """Initialize the loss criterion for the RTDETRDetectionModel."""
@@ -776,14 +782,13 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
                  C2f_SHSA, C2f_SHSA_CGLU, C2f_SMAFB, C2f_SMAFB_CGLU, CSP_MutilScaleEdgeInformationEnhance, C2f_FFCM, C2f_SFHF, CSP_FreqSpatial,
                  C2f_MSM, CSP_MutilScaleEdgeInformationSelect, C2f_HDRAB, C2f_RAB, LFEC3, C2f_FCA, C2f_CAMixer, MANet, MANet_FasterBlock, MANet_FasterCGLU,
                  MANet_Star, C2f_HFERB, C2f_DTAB, C2f_JDPM, C2f_ETB, C2f_FDT, PSConv, C2f_AP, C2f_ELGCA, C2f_ELGCA_CGLU, C2f_Strip, C2f_StripCGLU,
-                 C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter, RepHMS, C2f_SAVSS, C2f_MambaOut,
+                 C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter,C2f_DynamicFilter_EffectiveSE, C2f_SAVSS, C2f_MambaOut,
                  C2f_EfficientVIM, C2f_EfficientVIM_CGLU, CSP_MSCB_SC, C2f_MambaOut_UniRepLK, C2f_IEL, IELC3, C2f_RCB, C2f_FAT, C2f_LEGM, C2f_MobileMamba,
                  C2f_LFEM, LoGStem, C2f_SBSM, C2f_LSBlock, C2f_MambaOut_LSConv, C2f_TransMamba, C2f_EVS, C2f_EBlock, C2f_DBlock, C2f_FDConv, C2f_MambaOut_FDConv,
                  C2f_PFDConv, C2f_FasterFDConv, FDConvC3, C2f_DSAN, C2f_DSAN_EDFFN, C2f_MambaOut_DSA, C2f_DSA, C2f_RMB, GSConvE, C2f_SFSConv, C2f_MambaOut_SFSC,
                  C2f_PSFSConv, C2f_FasterSFSConv, C2f_GroupMamba, C2f_GroupMambaBlock, C2f_MambaVision, C2f_FourierConv, FourierConv, C2f_wConv, wConv2d,
                  C2f_GLVSS, C2f_ESC, C2f_MBRConv3, C2f_MBRConv5, MBRConv3C3, MBRConv5C3, C2f_VSSD, C2f_TVIM, C2f_CSI, C2f_SHSA_EPGO, C2f_SHSA_EPGO_CGLU, C2f_ConvAttn,
-                 C2f_UniConvBlock, C2f_LGLB, C2f_ConverseB, C2f_Converse2D, Converse2DC3, Converse2D, RepStem, C2f_GCConv, GCConvC3, GCConv, C2f_CFBlock, C2f_FMABlock,
-                 C2f_LWGA, C2f_CSSC, C2f_CNCM, C2f_HFRB, C2f_EVA, C2f_RMBC, C2f_RMBC_LA, C2f_SFMB):
+                 C2f_UniConvBlock, C2f_LGLB, C2f_ConverseB, C2f_Converse2D, Converse2DC3, Converse2D):
             if args[0] == 'head_channel':
                 args[0] = d[args[0]]
             c1, c2 = ch[f], args[0]
@@ -812,14 +817,13 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
                      C2f_MSMHSA_CGLU, CSP_PMSFA, C2f_MogaBlock, C2f_SHSA, C2f_SHSA_CGLU, C2f_SMAFB, C2f_SMAFB_CGLU, CSP_MutilScaleEdgeInformationEnhance,
                      C2f_FFCM, C2f_SFHF, CSP_FreqSpatial, C2f_MSM, CSP_MutilScaleEdgeInformationSelect, C2f_HDRAB, C2f_RAB, LFEC3, C2f_FCA, C2f_CAMixer, MANet,
                      MANet_FasterBlock, MANet_FasterCGLU, MANet_Star, C2f_HFERB, C2f_DTAB, C2f_JDPM, C2f_ETB, C2f_FDT, C2f_AP, C2f_ELGCA, C2f_ELGCA_CGLU, 
-                     C2f_Strip, C2f_StripCGLU, C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter, C2f_SAVSS, C2f_MambaOut,
+                     C2f_Strip, C2f_StripCGLU, C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter,C2f_DynamicFilter_EffectiveSE, C2f_MambaOut,
                      C2f_EfficientVIM, C2f_EfficientVIM_CGLU, CSP_MSCB_SC, C2f_MambaOut_UniRepLK, C2f_IEL, IELC3, C2f_RCB, C2f_FAT, C2f_LEGM, C2f_MobileMamba,
                      C2f_LFEM, C2f_SBSM, C2f_LSBlock, C2f_MambaOut_LSConv, C2f_TransMamba, C2f_EVS, C2f_EBlock, C2f_DBlock, C2f_FDConv, C2f_MambaOut_FDConv,
                      C2f_PFDConv, C2f_FasterFDConv, FDConvC3, C2f_DSAN, C2f_DSAN_EDFFN, C2f_MambaOut_DSA, C2f_DSA, C2f_RMB, C2f_SFSConv, C2f_MambaOut_SFSC,
                      C2f_PSFSConv, C2f_FasterSFSConv, C2f_GroupMamba, C2f_GroupMambaBlock, C2f_MambaVision, C2f_FourierConv, C2f_wConv, C2f_GLVSS, C2f_ESC,
                      C2f_MBRConv3, C2f_MBRConv5, MBRConv3C3, MBRConv5C3, C2f_VSSD, C2f_TVIM, C2f_CSI, C2f_SHSA_EPGO, C2f_SHSA_EPGO_CGLU, C2f_ConvAttn, C2f_UniConvBlock,
-                     C2f_LGLB, C2f_ConverseB, C2f_Converse2D, Converse2DC3, C2f_GCConv, GCConvC3, C2f_CFBlock, C2f_FMABlock, C2f_LWGA, C2f_CSSC, C2f_CNCM, C2f_HFRB, C2f_EVA, 
-                     C2f_RMBC, C2f_RMBC_LA, C2f_SFMB):
+                     C2f_LGLB, C2f_ConverseB, C2f_Converse2D, Converse2DC3):
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m in (AIFI, AIFI_LPE, TransformerEncoderLayer_LocalWindowAttention, TransformerEncoderLayer_DAttention, TransformerEncoderLayer_HiLo, 
@@ -829,8 +833,7 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
                    TransformerEncoderLayer_Pola_FMFFN, AIFI_SEFN, TransformerEncoderLayer_ASSA_SEFN, TransformerEncoderLayer_Pola_SEFN, AIFI_Mona,
                    TransformerEncoderLayer_Pola_SEFN_Mona, TransformerEncoderLayer_ASSA_SEFN_Mona, AIFI_DyT, TransformerEncoderLayer_ASSA_SEFN_Mona_DyT,
                    TransformerEncoderLayer_Pola_SEFN_Mona_DyT, AIFI_SEFFN, TransformerEncoderLayer_Pola_SEFFN_Mona_DyT, AIFI_EDFFN, TransformerEncoderLayer_Pola_EDFFN_Mona_DyT,
-                   TransformerEncoderLayer_MSLA, TransformerEncoderLayer_EPGO, TransformerEncoderLayer_SHSA, TransformerEncoderLayer_SHSA_EPGO, AIFI_DML,
-                   TransformerEncoderLayer_LRSA, TransformerEncoderLayer_MALA):
+                   TransformerEncoderLayer_MSLA, TransformerEncoderLayer_EPGO, TransformerEncoderLayer_SHSA, TransformerEncoderLayer_SHSA_EPGO):
             c2 = ch[f]
             args = [ch[f], *args]
         elif m in (HGStem, HGBlock, Ghost_HGBlock, Rep_HGBlock, HGBlock_Attention):
@@ -1023,7 +1026,7 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
             c1 = [ch[x] for x in f]
             c2 = c1[0]
             args = [c1]
-        elif m in {HAFB, MFM, LCA, HFFE}:
+        elif m in {HAFB, MFM}:
             c1 = [ch[x] for x in f]
             c2 = make_divisible(min(args[0], max_channels) * width, 8)
             args = [c1, c2, *args[1:]]

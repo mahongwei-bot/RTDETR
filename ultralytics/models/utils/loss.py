@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import dill as pickle
 
 from ultralytics.utils.loss import FocalLoss, VarifocalLoss, SlideLoss, EMASlideLoss, SlideVarifocalLoss, EMASlideVarifocalLoss, MALoss
-from ultralytics.utils.metrics import bbox_iou, bbox_inner_iou, bbox_focaler_iou, bbox_mpdiou, bbox_inner_mpdiou, bbox_focaler_mpdiou, wasserstein_loss, gcd_loss, WiseIouLoss
+from ultralytics.utils.metrics import bbox_iou, bbox_inner_iou, bbox_focaler_iou, bbox_mpdiou, bbox_inner_mpdiou, bbox_focaler_mpdiou, wasserstein_loss, WiseIouLoss
 
 from .ops import HungarianMatcher
 
@@ -77,9 +77,7 @@ class DETRLoss(nn.Module):
         
         # for nwd loss
         self.nwd_loss = False
-        # for gcd loss
-        self.gcd_loss = False
-        self.iou_ratio = 0.5 # total_iou_loss = self.iou_ratio * iou_loss + (1 - self.iou_ratio) * (nwd_loss or gcd_loss)
+        self.iou_ratio = 0.5
         
         # for wise-iou loss
         self.use_wiseiou = False
@@ -163,9 +161,6 @@ class DETRLoss(nn.Module):
         if self.nwd_loss:
             nwd = wasserstein_loss(pred_bboxes, gt_bboxes)
             loss[name_giou] = self.iou_ratio * (loss[name_giou].sum() / len(gt_bboxes)) + (1.0 - self.iou_ratio) * ((1.0 - nwd).sum() / len(gt_bboxes))
-        elif self.gcd_loss:
-            gcd = gcd_loss(pred_bboxes, gt_bboxes)
-            loss[name_giou] = self.iou_ratio * (loss[name_giou].sum() / len(gt_bboxes)) + (1.0 - self.iou_ratio) * ((1.0 - gcd).sum() / len(gt_bboxes) * 0.0002)
         else:
             loss[name_giou] = loss[name_giou].sum() / len(gt_bboxes)
         loss[name_giou] = self.loss_gain['giou'] * loss[name_giou]
@@ -377,6 +372,15 @@ class RTDETRDetectionLoss(DETRLoss):
         else:
             # If no denoising metadata is provided, set denoising loss to zero
             total_loss.update({f'{k}_dn': torch.tensor(0., device=self.device) for k in total_loss.keys()})
+        # small-object heatmap aux loss
+        if dn_meta is not None and ('so_hm_logits' in dn_meta) and ('so_hm_targets' in dn_meta):
+            hm_logits = dn_meta['so_hm_logits'].flatten(1)  # (B, H*W)
+            hm_tgt = dn_meta['so_hm_targets'].flatten(1)  # (B, H*W)
+            gain = float(dn_meta.get('so_hm_loss_gain', 0.2))
+            # reuse existing FocalLoss in ultralytics.utils.loss (already imported in this file)
+            total_loss['loss_so_hm'] = FocalLoss.forward(hm_logits, hm_tgt, gamma=2.0, alpha=0.25) * gain
+        else:
+            total_loss['loss_so_hm'] = torch.tensor(0., device=self.device)
 
         return total_loss
 

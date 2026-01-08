@@ -2,7 +2,7 @@
 """Model head modules."""
 
 import math
-import torch.nn.functional as F
+
 import torch
 import torch.nn as nn
 from torch.nn.init import constant_, xavier_uniform_
@@ -234,8 +234,6 @@ class RTDETRDecoder(nn.Module):
         decoder_layer = DeformableTransformerDecoderLayer(hd, nh, d_ffn, dropout, act, self.nl, ndp)
         self.decoder = DeformableTransformerDecoder(hd, decoder_layer, ndl, eval_idx)
 
-        # self.decoder = DeformableTransformerDecoder(hd, decoder_layer, ndl, eval_idx)
-
         # Denoising part
         self.denoising_class_embed = nn.Embedding(nc + 1, hd)
         self.num_denoising = nd
@@ -258,49 +256,13 @@ class RTDETRDecoder(nn.Module):
         self.dec_bbox_head = nn.ModuleList([MLP(hd, hd, 4, num_layers=3) for _ in range(ndl)])
 
         self._reset_parameters()
-        # --- small-object heatmap + guided token (default off) ---
-        self.so_enable = False
-        self.so_topk = 64  # K: 64/100 常用
-        self.so_heatmap_level = 1  # 用 P4 做 heatmap（x=[P3,P4,P5] -> index 1）
-        self.so_sample_level = 0  # 从 P3 采样 token（index 0）
-        self.so_small_area = 0.02  # 小目标阈值(归一化面积 w*h)，你后面要调
-        self.so_hm_loss_gain = 0.2  # heatmap loss 权重
-        self.so_anchor_grid = 0.05  # 对齐 _generate_anchors 的 grid_size :contentReference[oaicite:4]{index=4}
-
-        # heatmap head: (B, hd, H, W) -> (B,1,H,W) logits
-        self.so_hm_head = nn.Sequential(
-            nn.Conv2d(hd, hd, 3, padding=1, bias=True),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(hd, 1, 1, bias=True),
-        )
-
-        def enable_small_object_guidance(self, enable=True, topk=64, heatmap_level=1, sample_level=0,
-                                         small_area=0.02, hm_loss_gain=0.2):
-            self.so_enable = bool(enable)
-            self.so_topk = int(topk)
-            self.so_heatmap_level = int(heatmap_level)
-            self.so_sample_level = int(sample_level)
-            self.so_small_area = float(small_area)
-            self.so_hm_loss_gain = float(hm_loss_gain)
 
     def forward(self, x, batch=None):
         """Runs the forward pass of the module, returning bounding box and classification scores for the input."""
         from ultralytics.models.utils.ops import get_cdn_group
 
         # Input projection and embedding
-        if self.so_enable and (not self.export):  # 导出时建议关掉（topk + grid_sample 常见不友好）
-            feats, shapes, proj = self._get_encoder_input(x, return_proj=True)
-            hm_logits = self.so_hm_head(proj[self.so_heatmap_level])
-            so_tokens, so_anchors = self._so_sample_tokens(
-                hm_logits=hm_logits,
-                feat_hi=proj[self.so_sample_level],
-                topk=self.so_topk,
-                level_index=self.so_sample_level
-            )
-        else:
-            feats, shapes = self._get_encoder_input(x)
-            hm_logits, so_tokens, so_anchors = None, None, None
-        # feats, shapes = self._get_encoder_input(x)
+        feats, shapes = self._get_encoder_input(x)
 
         # Prepare denoising training
         dn_embed, dn_bbox, attn_mask, dn_meta = \
@@ -312,18 +274,9 @@ class RTDETRDecoder(nn.Module):
                           self.label_noise_ratio,
                           self.box_noise_scale,
                           self.training)
-        #修改
-        if self.training and (hm_logits is not None) and (dn_meta is not None) and (batch is not None):
-            H, W = hm_logits.shape[-2:]
-            hm_tgt = self._build_so_heatmap_target(batch, H, W, device=hm_logits.device, dtype=hm_logits.dtype)
-            dn_meta['so_hm_logits'] = hm_logits
-            dn_meta['so_hm_targets'] = hm_tgt
-            dn_meta['so_hm_loss_gain'] = self.so_hm_loss_gain
 
-        # embed, refer_bbox, enc_bboxes, enc_scores = \
-        #     self._get_decoder_input(feats, shapes, dn_embed, dn_bbox)
         embed, refer_bbox, enc_bboxes, enc_scores = \
-            self._get_decoder_input(feats, shapes, dn_embed, dn_bbox, so_tokens=so_tokens, so_anchors=so_anchors)
+            self._get_decoder_input(feats, shapes, dn_embed, dn_bbox)
 
         # Decoder
         dec_bboxes, dec_scores = self.decoder(embed,
@@ -340,60 +293,6 @@ class RTDETRDecoder(nn.Module):
         # (bs, 300, 4+nc)
         y = torch.cat((dec_bboxes.squeeze(0), dec_scores.squeeze(0).sigmoid()), -1)
         return y if self.export else (y, x)
-
-    def _build_so_heatmap_target(self, batch, H, W, device, dtype):
-        # batch comes from tasks.py targets: {'cls','bboxes','batch_idx','gt_groups'} :contentReference[oaicite:7]{index=7}
-        hm = torch.zeros((len(batch['gt_groups']), 1, H, W), device=device, dtype=dtype)
-        if batch is None or 'bboxes' not in batch or batch['bboxes'].numel() == 0:
-            return hm
-
-        bboxes = batch['bboxes']  # (N,4) xywh normalized
-        bidx = batch['batch_idx'].long()  # (N,)
-        area = bboxes[:, 2] * bboxes[:, 3]
-        keep = area < self.so_small_area
-        if keep.sum() == 0:
-            return hm
-
-        bboxes = bboxes[keep]
-        bidx = bidx[keep]
-        # center to feature coords
-        px = (bboxes[:, 0] * W).long().clamp_(0, W - 1)
-        py = (bboxes[:, 1] * H).long().clamp_(0, H - 1)
-        hm[bidx, 0, py, px] = 1.0
-        return hm
-
-    def _so_sample_tokens(self, hm_logits, feat_hi, topk, level_index):
-        # hm_logits: (B,1,Hlo,Wlo) ; feat_hi: (B,hd,Hhi,Whi)
-        B, _, Hlo, Wlo = hm_logits.shape
-        _, C, Hhi, Whi = feat_hi.shape
-        K = min(int(topk), Hlo * Wlo)
-        if K <= 0:
-            return None, None
-
-        hm_prob = hm_logits.sigmoid().flatten(1)  # (B, Hlo*Wlo)
-        topk_idx = torch.topk(hm_prob, K, dim=1).indices  # (B,K)
-
-        ys = (topk_idx // Wlo).to(torch.float32)  # (B,K)
-        xs = (topk_idx % Wlo).to(torch.float32)  # (B,K)
-
-        # normalized [0,1] at P4 pixel centers
-        u = (xs + 0.5) / float(Wlo)
-        v = (ys + 0.5) / float(Hlo)
-
-        # grid_sample expects [-1,1]
-        grid_x = u * 2.0 - 1.0
-        grid_y = v * 2.0 - 1.0
-        grid = torch.stack([grid_x, grid_y], dim=-1).view(B, K, 1, 2)  # (B,K,1,2)
-
-        sampled = F.grid_sample(feat_hi, grid, mode='bilinear', align_corners=False)  # (B,C,K,1)
-        tokens = sampled.squeeze(-1).permute(0, 2, 1).contiguous()  # (B,K,C)
-
-        # anchors for these guided queries (logit space like _generate_anchors) :contentReference[oaicite:8]{index=8}
-        wh = torch.full((B, K, 2), self.so_anchor_grid * (2.0 ** level_index),
-                        device=feat_hi.device, dtype=feat_hi.dtype)
-        a = torch.cat([u.unsqueeze(-1), v.unsqueeze(-1), wh], dim=-1).clamp_(1e-4, 1 - 1e-4)  # (B,K,4)
-        anchors_logit = torch.log(a / (1 - a))
-        return tokens, anchors_logit
 
     def _generate_anchors(self, shapes, grid_size=0.05, dtype=torch.float32, device='cpu', eps=1e-2):
         """Generates anchor bounding boxes for given shapes with specific grid size and validates them."""
@@ -415,38 +314,25 @@ class RTDETRDecoder(nn.Module):
         anchors = anchors.masked_fill(~valid_mask, float('inf'))
         return anchors, valid_mask
 
-    def _get_encoder_input(self, x, return_proj=False):
-        x = [self.input_proj[i](feat) for i, feat in
-             enumerate(x)]  # projected maps :contentReference[oaicite:6]{index=6}
-        feats, shapes = [], []
+    def _get_encoder_input(self, x):
+        """Processes and returns encoder inputs by getting projection features from input and concatenating them."""
+        # Get projection features
+        x = [self.input_proj[i](feat) for i, feat in enumerate(x)]
+        # Get encoder inputs
+        feats = []
+        shapes = []
         for feat in x:
             h, w = feat.shape[2:]
+            # [b, c, h, w] -> [b, h*w, c]
             feats.append(feat.flatten(2).permute(0, 2, 1))
+            # [nl, 2]
             shapes.append([h, w])
+
+        # [b, h*w, c]
         feats = torch.cat(feats, 1)
-        return (feats, shapes, x) if return_proj else (feats, shapes)
+        return feats, shapes
 
-    # def _get_encoder_input(self, x):
-    #     """Processes and returns encoder inputs by getting projection features from input and concatenating them."""
-    #     # Get projection features
-    #     x = [self.input_proj[i](feat) for i, feat in enumerate(x)]
-    #     # Get encoder inputs
-    #     feats = []
-    #     shapes = []
-    #     for feat in x:
-    #         h, w = feat.shape[2:]
-    #         # [b, c, h, w] -> [b, h*w, c]
-    #         feats.append(feat.flatten(2).permute(0, 2, 1))
-    #         # [nl, 2]
-    #         shapes.append([h, w])
-    #
-    #     # [b, h*w, c]
-    #     feats = torch.cat(feats, 1)
-    #     return feats, shapes
-
-    # def _get_decoder_input(self, feats, shapes, dn_embed=None, dn_bbox=None):
-    def _get_decoder_input(self, feats, shapes, dn_embed=None, dn_bbox=None, so_tokens=None, so_anchors=None):
-
+    def _get_decoder_input(self, feats, shapes, dn_embed=None, dn_bbox=None):
         """Generates and prepares the input required for the decoder from the provided features and shapes."""
         bs = len(feats)
         # Prepare input for decoder
@@ -456,79 +342,25 @@ class RTDETRDecoder(nn.Module):
         enc_outputs_scores = self.enc_score_head(features)  # (bs, h*w, nc)
 
         # Query selection
-        # # (bs, num_queries)
-        # topk_ind = torch.topk(enc_outputs_scores.max(-1).values, self.num_queries, dim=1).indices.view(-1)
-        # # (bs, num_queries)
-        # batch_ind = torch.arange(end=bs, dtype=topk_ind.dtype).unsqueeze(-1).repeat(1, self.num_queries).view(-1)
-        #
-        # # (bs, num_queries, 256)
-        # top_k_features = features[batch_ind, topk_ind].view(bs, self.num_queries, -1)
-        # # (bs, num_queries, 4)
-        # top_k_anchors = anchors[:, topk_ind].view(bs, self.num_queries, -1)
-        #
-        # # Dynamic anchors + static content
-        # refer_bbox = self.enc_bbox_head(top_k_features) + top_k_anchors
-        #
-        # enc_bboxes = refer_bbox.sigmoid()
-        # if dn_bbox is not None:
-        #     refer_bbox = torch.cat([dn_bbox, refer_bbox], 1)
-        # enc_scores = enc_outputs_scores[batch_ind, topk_ind].view(bs, self.num_queries, -1)
-        #
-        # embeddings = self.tgt_embed.weight.unsqueeze(0).repeat(bs, 1, 1) if self.learnt_init_query else top_k_features
-        # if self.training:
-        #     refer_bbox = refer_bbox.detach()
-        #     if not self.learnt_init_query:
-        #         embeddings = embeddings.detach()
-        # if dn_embed is not None:
-        #     embeddings = torch.cat([dn_embed, embeddings], 1)
-        #
-        # return embeddings, refer_bbox, enc_bboxes, enc_scores
-        enc_outputs_scores = self.enc_score_head(features)  # (bs, h*w, nc) :contentReference[oaicite:13]{index=13}
+        # (bs, num_queries)
+        topk_ind = torch.topk(enc_outputs_scores.max(-1).values, self.num_queries, dim=1).indices.view(-1)
+        # (bs, num_queries)
+        batch_ind = torch.arange(end=bs, dtype=topk_ind.dtype).unsqueeze(-1).repeat(1, self.num_queries).view(-1)
 
-        bs = len(feats)
-        K = 0 if (so_tokens is None or so_anchors is None) else so_tokens.shape[1]
-        K = min(K, self.num_queries)
-        main_nq = self.num_queries - K
-
-        # (bs, main_nq)
-        if main_nq > 0:
-            topk_ind = torch.topk(enc_outputs_scores.max(-1).values, main_nq, dim=1).indices.view(-1)
-            batch_ind = torch.arange(end=bs, dtype=topk_ind.dtype, device=feats.device).unsqueeze(-1).repeat(1,
-                                                                                                             main_nq).view(
-                -1)
-
-            top_k_features = features[batch_ind, topk_ind].view(bs, main_nq, -1)
-            top_k_anchors = anchors[:, topk_ind].view(bs, main_nq, -1)
-            enc_scores = enc_outputs_scores[batch_ind, topk_ind].view(bs, main_nq, -1)
-        else:
-            top_k_features = features.new_zeros((bs, 0, features.shape[-1]))
-            top_k_anchors = anchors.new_zeros((bs, 0, 4))
-            enc_scores = enc_outputs_scores.new_zeros((bs, 0, enc_outputs_scores.shape[-1]))
-
-        # append guided K queries
-        if K > 0:
-            so_features = self.enc_output(
-                so_tokens)  # (bs,K,hd) uses same encoder head :contentReference[oaicite:14]{index=14}
-            so_scores = self.enc_score_head(so_features)  # (bs,K,nc)
-
-            top_k_features = torch.cat([top_k_features, so_features], dim=1)  # -> (bs,300,hd)
-            top_k_anchors = torch.cat([top_k_anchors, so_anchors], dim=1)  # -> (bs,300,4)
-            enc_scores = torch.cat([enc_scores, so_scores], dim=1)  # -> (bs,300,nc)
+        # (bs, num_queries, 256)
+        top_k_features = features[batch_ind, topk_ind].view(bs, self.num_queries, -1)
+        # (bs, num_queries, 4)
+        top_k_anchors = anchors[:, topk_ind].view(bs, self.num_queries, -1)
 
         # Dynamic anchors + static content
         refer_bbox = self.enc_bbox_head(top_k_features) + top_k_anchors
-        enc_bboxes = refer_bbox.sigmoid()
 
+        enc_bboxes = refer_bbox.sigmoid()
         if dn_bbox is not None:
             refer_bbox = torch.cat([dn_bbox, refer_bbox], 1)
+        enc_scores = enc_outputs_scores[batch_ind, topk_ind].view(bs, self.num_queries, -1)
 
-        # embeddings: if learnt_init_query=True, replace tail K with guided features
         embeddings = self.tgt_embed.weight.unsqueeze(0).repeat(bs, 1, 1) if self.learnt_init_query else top_k_features
-        if self.learnt_init_query and K > 0:
-            embeddings = embeddings.clone()
-            embeddings[:, -K:] = top_k_features[:, -K:]
-
-        # keep original detach behavior :contentReference[oaicite:15]{index=15}
         if self.training:
             refer_bbox = refer_bbox.detach()
             if not self.learnt_init_query:

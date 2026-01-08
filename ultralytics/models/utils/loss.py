@@ -372,15 +372,6 @@ class RTDETRDetectionLoss(DETRLoss):
         else:
             # If no denoising metadata is provided, set denoising loss to zero
             total_loss.update({f'{k}_dn': torch.tensor(0., device=self.device) for k in total_loss.keys()})
-        # small-object heatmap aux loss
-        if dn_meta is not None and ('so_hm_logits' in dn_meta) and ('so_hm_targets' in dn_meta):
-            hm_logits = dn_meta['so_hm_logits'].flatten(1)  # (B, H*W)
-            hm_tgt = dn_meta['so_hm_targets'].flatten(1)  # (B, H*W)
-            gain = float(dn_meta.get('so_hm_loss_gain', 0.2))
-            # reuse existing FocalLoss in ultralytics.utils.loss (already imported in this file)
-            total_loss['loss_so_hm'] = FocalLoss.forward(hm_logits, hm_tgt, gamma=2.0, alpha=0.25) * gain
-        else:
-            total_loss['loss_so_hm'] = torch.tensor(0., device=self.device)
 
         return total_loss
 

@@ -432,23 +432,17 @@ class RTDETRDetectionModel(DetectionModel):
         predict: Performs a forward pass through the network and returns the output.
     """
 
-    # def __init__(self, cfg='rtdetr-l.yaml', ch=3, nc=None, verbose=True):
-    #     """
-    #     Initialize the RTDETRDetectionModel.
-    #
-    #     Args:
-    #         cfg (str): Configuration file name or path.
-    #         ch (int): Number of input channels.
-    #         nc (int, optional): Number of classes. Defaults to None.
-    #         verbose (bool, optional): Print additional information during initialization. Defaults to True.
-    #     """
-    #     super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-    def __init__(self, cfg='', ch=3, nc=None, verbose=True):
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)  # :contentReference[oaicite:17]{index=17}
-        head = self.model[-1]
-        so_cfg = self.yaml.get('so_guidance', None)
-        if isinstance(so_cfg, dict) and hasattr(head, 'enable_small_object_guidance'):
-            head.enable_small_object_guidance(**so_cfg)
+    def __init__(self, cfg='rtdetr-l.yaml', ch=3, nc=None, verbose=True):
+        """
+        Initialize the RTDETRDetectionModel.
+
+        Args:
+            cfg (str): Configuration file name or path.
+            ch (int): Number of input channels.
+            nc (int, optional): Number of classes. Defaults to None.
+            verbose (bool, optional): Print additional information during initialization. Defaults to True.
+        """
+        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
 
     def init_criterion(self):
         """Initialize the loss criterion for the RTDETRDetectionModel."""
@@ -782,7 +776,7 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
                  C2f_SHSA, C2f_SHSA_CGLU, C2f_SMAFB, C2f_SMAFB_CGLU, CSP_MutilScaleEdgeInformationEnhance, C2f_FFCM, C2f_SFHF, CSP_FreqSpatial,
                  C2f_MSM, CSP_MutilScaleEdgeInformationSelect, C2f_HDRAB, C2f_RAB, LFEC3, C2f_FCA, C2f_CAMixer, MANet, MANet_FasterBlock, MANet_FasterCGLU,
                  MANet_Star, C2f_HFERB, C2f_DTAB, C2f_JDPM, C2f_ETB, C2f_FDT, PSConv, C2f_AP, C2f_ELGCA, C2f_ELGCA_CGLU, C2f_Strip, C2f_StripCGLU,
-                 C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter,C2f_DynamicFilter_EffectiveSE, C2f_SAVSS, C2f_MambaOut,
+                 C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter, RepHMS, C2f_SAVSS, C2f_MambaOut,
                  C2f_EfficientVIM, C2f_EfficientVIM_CGLU, CSP_MSCB_SC, C2f_MambaOut_UniRepLK, C2f_IEL, IELC3, C2f_RCB, C2f_FAT, C2f_LEGM, C2f_MobileMamba,
                  C2f_LFEM, LoGStem, C2f_SBSM, C2f_LSBlock, C2f_MambaOut_LSConv, C2f_TransMamba, C2f_EVS, C2f_EBlock, C2f_DBlock, C2f_FDConv, C2f_MambaOut_FDConv,
                  C2f_PFDConv, C2f_FasterFDConv, FDConvC3, C2f_DSAN, C2f_DSAN_EDFFN, C2f_MambaOut_DSA, C2f_DSA, C2f_RMB, GSConvE, C2f_SFSConv, C2f_MambaOut_SFSC,
@@ -817,7 +811,7 @@ def parse_model(d, ch, verbose=True, warehouse_manager=None):  # model_dict, inp
                      C2f_MSMHSA_CGLU, CSP_PMSFA, C2f_MogaBlock, C2f_SHSA, C2f_SHSA_CGLU, C2f_SMAFB, C2f_SMAFB_CGLU, CSP_MutilScaleEdgeInformationEnhance,
                      C2f_FFCM, C2f_SFHF, CSP_FreqSpatial, C2f_MSM, CSP_MutilScaleEdgeInformationSelect, C2f_HDRAB, C2f_RAB, LFEC3, C2f_FCA, C2f_CAMixer, MANet,
                      MANet_FasterBlock, MANet_FasterCGLU, MANet_Star, C2f_HFERB, C2f_DTAB, C2f_JDPM, C2f_ETB, C2f_FDT, C2f_AP, C2f_ELGCA, C2f_ELGCA_CGLU, 
-                     C2f_Strip, C2f_StripCGLU, C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter,C2f_DynamicFilter_EffectiveSE, C2f_MambaOut,
+                     C2f_Strip, C2f_StripCGLU, C2f_KAT, C2f_Faster_KAN, C2f_DCMB, C2f_DCMB_KAN, C2f_GlobalFilter, C2f_DynamicFilter, C2f_SAVSS, C2f_MambaOut,
                      C2f_EfficientVIM, C2f_EfficientVIM_CGLU, CSP_MSCB_SC, C2f_MambaOut_UniRepLK, C2f_IEL, IELC3, C2f_RCB, C2f_FAT, C2f_LEGM, C2f_MobileMamba,
                      C2f_LFEM, C2f_SBSM, C2f_LSBlock, C2f_MambaOut_LSConv, C2f_TransMamba, C2f_EVS, C2f_EBlock, C2f_DBlock, C2f_FDConv, C2f_MambaOut_FDConv,
                      C2f_PFDConv, C2f_FasterFDConv, FDConvC3, C2f_DSAN, C2f_DSAN_EDFFN, C2f_MambaOut_DSA, C2f_DSA, C2f_RMB, C2f_SFSConv, C2f_MambaOut_SFSC,
